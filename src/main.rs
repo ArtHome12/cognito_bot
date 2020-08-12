@@ -190,12 +190,11 @@ async fn check_database() {
    // Если таблица не существует, создадим её
    if rows.is_empty() {
       client.execute("CREATE TABLE chats (
-         CREATE TABLE users (
-            PRIMARY KEY (user_id),
-            user_id        INTEGER        NOT NULL,
-            chat_name      VARCHAR(100)   NOT NULL,
-            last_use       TIMESTAMP      NOT NULL
-         )", &[]).await.unwrap();
+         PRIMARY KEY (user_id),
+         user_id        INTEGER        NOT NULL,
+         chat_name      VARCHAR(100)   NOT NULL,
+         last_use       TIMESTAMP      NOT NULL
+      )", &[]).await.unwrap();
    }
 }
 
