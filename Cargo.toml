@@ -9,7 +9,7 @@ edition = "2018"
 [dependencies]
 log = "0.4.11"
 futures = "0.3.5"
-tokio = "0.2.22"
+tokio = { version =  "0.2.22", features = ["rt-threaded", "macros"] }
 pretty_env_logger = "0.4.0"
 teloxide = "0.3.0"
 
