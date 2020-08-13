@@ -338,9 +338,15 @@ async fn handle_callback(cx: UpdateWithCx<CallbackQuery>) {
                         };
 
                         // Отредактируем сообщение у пользователя
-                        cx.bot.edit_message_text(original_message, String::from("Сообщение находится на рассмотрении администратора чата и после его одобрения оно появится в чате"));
-
-                        String::from("Успешно")
+                        let res = cx.bot
+                        .edit_message_text(original_message, String::from("Сообщение находится на рассмотрении администратора чата и после его одобрения оно появится в чате"))
+                        .send().
+                        await;
+                        
+                        match res {
+                           Ok(_) => String::from("Успешно"),
+                           Err(e) => format!("Ошибка  {}", e),
+                        }
                      }
                      Err(e) => format!("Ошибка: {}", e)
                   }
