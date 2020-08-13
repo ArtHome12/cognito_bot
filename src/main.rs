@@ -11,7 +11,7 @@ use teloxide::{
    dispatching::update_listeners,
    prelude::*,
    utils::command::BotCommand,
-   types::{ChatId,},
+   types::{ChatId, InlineKeyboardMarkup, InlineKeyboardButton, },
 };
 use std::{convert::Infallible, env, net::SocketAddr, };
 use tokio::sync::mpsc;
@@ -87,12 +87,13 @@ async fn handle_message(cx: UpdateWithCx<Message>) -> ResponseResult<Message> {
                }
             }
          } else {
-            cx.answer_str("Текстовое сообщение, пожалуйста!").await
+            cx.reply_to("Выберите чат для отправки")
+            .reply_markup(chats_markup().await)
+            .send()
+            .await
          }
       }
    }
-
-   // Ok(())
 }
 
 #[tokio::main]
@@ -254,4 +255,16 @@ async fn db_user_chat_name(user_id: i32) -> Option<String> {
       Ok(data) => Some(data.get(0)),
       _ => None,
    }
+}
+
+/// Возвращает список кнопок с чатами
+async fn chats_markup() -> InlineKeyboardMarkup {
+   // Создаём кнопки
+   let buttons = vec![
+      InlineKeyboardButton::callback(String::from("test"), String::from("test")),
+   ];
+
+   // Возвращаем меню
+   InlineKeyboardMarkup::default()
+   .append_row(buttons)
 }
