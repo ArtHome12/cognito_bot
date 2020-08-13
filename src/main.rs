@@ -11,7 +11,7 @@ use teloxide::{
    dispatching::update_listeners,
    prelude::*,
    utils::command::BotCommand,
-   types::{ChatId, InlineKeyboardMarkup, InlineKeyboardButton, },
+   types::{ChatId, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, },
 };
 use std::{convert::Infallible, env, net::SocketAddr, };
 use tokio::sync::mpsc;
@@ -197,7 +197,11 @@ async fn run() {
          handle_message(message).await.expect("Something wrong with the bot!");
       })
    })
-   // .callback_queries_handler(handle_callback_query)
+   .callback_queries_handler(|rx: DispatcherHandlerRx<CallbackQuery>| {
+      rx.for_each_concurrent(None, |cx| async move {
+         handle_callback(cx).await
+      })
+   })
    .dispatch_with_listener(
       webhook(bot).await,
       LoggingErrorHandler::with_custom_text("An error from the update listener"),
@@ -258,6 +262,16 @@ async fn db_user_chat_name(user_id: i32) -> Option<String> {
    }
 }
 
+/// Возвращает идентификатор админа чата
+async fn db_user_id(chat_name: &String) -> Option<i32> {
+   let client = DB.get().unwrap();
+   let res = client.query_one("SELECT user_id FROM chats WHERE chat_name = $1::VARCHAR(100)", &[&chat_name]).await;
+   match res {
+      Ok(data) => Some(data.get(0)),
+      _ => None,
+   }
+}
+
 /// Возвращает список кнопок с чатами
 async fn chats_markup() -> InlineKeyboardMarkup {
    let client = DB.get().unwrap();
@@ -283,5 +297,89 @@ async fn chats_markup() -> InlineKeyboardMarkup {
 
       },
       _ => InlineKeyboardMarkup::default(),
+   }
+}
+
+async fn handle_callback(cx: UpdateWithCx<CallbackQuery>) {
+   let query = &cx.update;
+   let query_id = &query.id;
+
+   // Сообщение для отправки обратно
+   let msg = match &query.data {
+      None => {
+         String::from("Error No data")
+      }
+      Some(data) => {
+         // Получим текст сообщения
+         if let Some(message) = query.message.as_ref().and_then(|s| Message::text(&s)) {
+            // Код пользователя
+            // let user_id = query.from.id;
+
+            // Код администратора по имени чата
+            let admin = db_user_id(data).await;
+
+            match admin {
+               Some(id) => {
+
+                  // Отправим сообщение администратору на модерацию
+                  let chat_id = ChatId::Id(i64::from(id));
+                  let res = cx.bot
+                  .send_message(chat_id, format!("Поступило сообщение\n{}", message))
+                  .send()
+                  .await;
+                  match res {
+                     Ok(_) => {
+                        String::from("Успешно")
+                     }
+                     Err(e) => format!("Ошибка: {}", e)
+                  }
+               },
+               None => String::from("Error No admin")
+            }
+         } else {
+            String::from("Слишком старое сообщение")
+         }
+         // Идентифицируем и исполним команду
+/*         match CallbackCommand::from(&data) {
+            CallbackCommand::UnknownCommand => { settings::log(&format!("UnknownCommand {}", &data)).await; format!("UnknownCommand {}", &data)}
+            CallbackCommand::Add(rest_num, group_num, dish_num) => format!("Добавить {}: {}", db::make_key_3_int(rest_num, group_num, dish_num), db::is_success(add_dish(&cx, rest_num, group_num, dish_num, user_id).await)),
+            CallbackCommand::Remove(rest_num, group_num, dish_num) => format!("Удалить {}: {}", db::make_key_3_int(rest_num, group_num, dish_num), db::is_success(remove_dish(&cx, rest_num, group_num, dish_num, user_id).await)),
+            CallbackCommand::GroupsByRestaurantAndCategory(rest_num, cat_id) => 
+               format!("Группы '{}' {}", db::id_to_category(cat_id), db::is_success(eat_group::show_inline_interface(&cx, cat_id, rest_num).await)),
+            CallbackCommand::ReturnToCategory(cat_id) => 
+               format!("Возврат к '{}' {}", db::id_to_category(cat_id), db::is_success(eat_rest::show_inline_interface(&cx, cat_id).await)),
+            CallbackCommand::Dishes(rest_num, group_num, cat_id) => 
+               format!("Блюда {}:{} {}", rest_num, group_num, db::is_success(eat_dish::show_inline_interface(&cx, cat_id, rest_num, group_num).await)),
+            CallbackCommand::ReturnToGroups(rest_num, cat_id) => 
+               format!("Группы '{}' {}", db::id_to_category(cat_id), db::is_success(eat_group::show_inline_interface(&cx, cat_id, rest_num).await)),
+            CallbackCommand::Dish(rest_num, group_num, dish_num) =>
+               format!("Блюдо '{}': {}", db::make_key_3_int(rest_num, group_num, dish_num), db::is_success(eat_dish::show_dish_inline(&cx, rest_num, group_num, dish_num).await)),
+            CallbackCommand::ReturnToDishes(rest_num, group_num, cat_id) =>
+               format!("Блюда {}:{} {}", rest_num, group_num, db::is_success(eat_dish::show_inline_interface(&cx, cat_id, rest_num, group_num).await)),
+            CallbackCommand::GroupsByRestaurantNow(rest_num) => 
+               format!("Работающие: {}", db::is_success(eat_group_now::show_inline_interface(&cx, rest_num).await)),
+            CallbackCommand::ReturnToRestaurantsNow => 
+               format!("Работающие: {}", db::is_success(eat_rest_now::show_inline_interface(&cx).await)),
+            CallbackCommand::SendBasket(rest_id) => {
+               let res = match query.message.clone() {
+                  Some(message) => basket::send_basket(&cx, rest_id, user_id, message.id).await,
+                  None => false,
+               };
+               format!("Отправка: {}", db::is_success(res))
+            }
+            // CallbackCommand::BasketMessageToCaterer(rest_id) => format!("{}", db::is_success(basket::prepare_to_send_message(user_id, rest_id).await)),
+            CallbackCommand::BasketCancel(ticket_id) => format!("{}", db::is_success(cancel_ticket(&cx, user_id, ticket_id).await)),
+            CallbackCommand::BasketNext(ticket_id) => format!("{}", db::is_success(process_ticket(&cx, user_id, ticket_id).await)),
+         }*/
+      }
+   };
+
+   // Отправляем ответ, который показывается во всплывающем окошке
+   match cx.bot.answer_callback_query(query_id)
+      .text(&msg)
+      .send()
+      .await {
+         Err(_) => log::info!("Error handle_message {}", &msg),
+         _ => (),
    }
 }
