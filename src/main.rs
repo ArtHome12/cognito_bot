@@ -19,6 +19,7 @@ use warp::Filter;
 use reqwest::StatusCode;
 use once_cell::sync::{OnceCell};
 use tokio_postgres::{NoTls};
+use arraylib::iter::IteratorExt;
 
 
 // Клиент БД
@@ -259,12 +260,20 @@ async fn db_user_chat_name(user_id: i32) -> Option<String> {
 
 /// Возвращает список кнопок с чатами
 async fn chats_markup() -> InlineKeyboardMarkup {
-   // Создаём кнопки
-   let buttons = vec![
-      InlineKeyboardButton::callback(String::from("test"), String::from("test")),
-   ];
+   let client = DB.get().unwrap();
+   match client.query("SELECT chat_name FROM chats", &[]).await {
+      Ok(rows) => {
+         // Создадим кнопки
+         let buttons: Vec<InlineKeyboardButton> = rows.into_iter()
+         .map(|row| (InlineKeyboardButton::callback(row.get(0), row.get(0)))).collect();
 
-   // Возвращаем меню
-   InlineKeyboardMarkup::default()
-   .append_row(buttons)
+         // Поделим по две в ряд
+         let markup = buttons.into_iter().array_chunks::<[_; 2]>()
+         .fold(InlineKeyboardMarkup::default(), |acc, [left, right]| acc.append_row(vec![left, right]));
+
+         // Вернём результат
+         markup
+      },
+      _ => InlineKeyboardMarkup::default(),
+   }
 }
