@@ -36,7 +36,8 @@ enum Command {
    Unregister,
 }
 
-async fn answer(cx: UpdateWithCx<Message>, command: Command) -> ResponseResult<()> {
+async fn handle_message(cx: cmd::Cx<cmd::Dialogue>) {
+// async fn answer(cx: UpdateWithCx<Message>, command: Command) -> ResponseResult<()> {
     match command {
       Command::Start => cx.answer("Добро пожаловать. Отправьте сообщение, выберите чат из списка зарегистрированных в боте и оно будет направлено на модерацию администратору чата (он не будет знать, от кого). Если администратор одобрит его публикацию, сообщение будет отправлено ботом в чат также анонимно. Все поддерживаемые команды: /help").send().await?,
       Command::Help => cx.answer(Command::descriptions()).send().await?,
@@ -176,7 +177,18 @@ async fn run() {
    // Создадим таблицу в БД, если её ещё нет
    check_database().await;
 
-   teloxide::commands_repl_with_listener(bot.clone(), "cognito_bot", answer, webhook(bot).await).await;
+   // teloxide::commands_repl_with_listener(bot.clone(), "cognito_bot", answer, webhook(bot).await).await;
+   Dispatcher::new(Arc::clone(&bot))
+   .messages_handler(DispatcherHandler::new(|cx| async move {
+      handle_message(cx).await.expect("Something wrong with the bot!")
+   }))
+   // .callback_queries_handler(handle_callback_query)
+   .dispatch_with_listener(
+      webhook(bot).await,
+      LoggingErrorHandler::with_custom_text("An error from the update listener"),
+   )
+   .await;
+
 }
 
 /// Создаёт таблицу, если её ещё не существует
