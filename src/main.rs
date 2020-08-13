@@ -11,7 +11,9 @@ use teloxide::{
    dispatching::update_listeners,
    prelude::*,
    utils::command::BotCommand,
-   types::{ChatId, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, },
+   types::{ChatId, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, 
+      ChatOrInlineMessage,
+   },
 };
 use std::{convert::Infallible, env, net::SocketAddr, };
 use tokio::sync::mpsc;
@@ -313,7 +315,7 @@ async fn handle_callback(cx: UpdateWithCx<CallbackQuery>) {
          // Получим текст сообщения
          if let Some(message) = query.message.as_ref().and_then(|s| Message::text(&s)) {
             // Код пользователя
-            // let user_id = query.from.id;
+            let user_id = query.from.id;
 
             // Код администратора по имени чата
             let admin = db_user_id(data).await;
@@ -329,6 +331,15 @@ async fn handle_callback(cx: UpdateWithCx<CallbackQuery>) {
                   .await;
                   match res {
                      Ok(_) => {
+                        // Ссылка на исправляемое сообщение
+                        let original_message = ChatOrInlineMessage::Chat {
+                           chat_id: ChatId::Id(i64::from(user_id)),
+                           message_id: query.message.as_ref().unwrap().id,
+                        };
+
+                        // Отредактируем сообщение у пользователя
+                        cx.bot.edit_message_text(original_message, String::from("Сообщение находится на рассмотрении администратора чата и после его одобрения оно появится в чате"));
+
                         String::from("Успешно")
                      }
                      Err(e) => format!("Ошибка: {}", e)
@@ -339,38 +350,6 @@ async fn handle_callback(cx: UpdateWithCx<CallbackQuery>) {
          } else {
             String::from("Слишком старое сообщение")
          }
-         // Идентифицируем и исполним команду
-/*         match CallbackCommand::from(&data) {
-            CallbackCommand::UnknownCommand => { settings::log(&format!("UnknownCommand {}", &data)).await; format!("UnknownCommand {}", &data)}
-            CallbackCommand::Add(rest_num, group_num, dish_num) => format!("Добавить {}: {}", db::make_key_3_int(rest_num, group_num, dish_num), db::is_success(add_dish(&cx, rest_num, group_num, dish_num, user_id).await)),
-            CallbackCommand::Remove(rest_num, group_num, dish_num) => format!("Удалить {}: {}", db::make_key_3_int(rest_num, group_num, dish_num), db::is_success(remove_dish(&cx, rest_num, group_num, dish_num, user_id).await)),
-            CallbackCommand::GroupsByRestaurantAndCategory(rest_num, cat_id) => 
-               format!("Группы '{}' {}", db::id_to_category(cat_id), db::is_success(eat_group::show_inline_interface(&cx, cat_id, rest_num).await)),
-            CallbackCommand::ReturnToCategory(cat_id) => 
-               format!("Возврат к '{}' {}", db::id_to_category(cat_id), db::is_success(eat_rest::show_inline_interface(&cx, cat_id).await)),
-            CallbackCommand::Dishes(rest_num, group_num, cat_id) => 
-               format!("Блюда {}:{} {}", rest_num, group_num, db::is_success(eat_dish::show_inline_interface(&cx, cat_id, rest_num, group_num).await)),
-            CallbackCommand::ReturnToGroups(rest_num, cat_id) => 
-               format!("Группы '{}' {}", db::id_to_category(cat_id), db::is_success(eat_group::show_inline_interface(&cx, cat_id, rest_num).await)),
-            CallbackCommand::Dish(rest_num, group_num, dish_num) =>
-               format!("Блюдо '{}': {}", db::make_key_3_int(rest_num, group_num, dish_num), db::is_success(eat_dish::show_dish_inline(&cx, rest_num, group_num, dish_num).await)),
-            CallbackCommand::ReturnToDishes(rest_num, group_num, cat_id) =>
-               format!("Блюда {}:{} {}", rest_num, group_num, db::is_success(eat_dish::show_inline_interface(&cx, cat_id, rest_num, group_num).await)),
-            CallbackCommand::GroupsByRestaurantNow(rest_num) => 
-               format!("Работающие: {}", db::is_success(eat_group_now::show_inline_interface(&cx, rest_num).await)),
-            CallbackCommand::ReturnToRestaurantsNow => 
-               format!("Работающие: {}", db::is_success(eat_rest_now::show_inline_interface(&cx).await)),
-            CallbackCommand::SendBasket(rest_id) => {
-               let res = match query.message.clone() {
-                  Some(message) => basket::send_basket(&cx, rest_id, user_id, message.id).await,
-                  None => false,
-               };
-               format!("Отправка: {}", db::is_success(res))
-            }
-            // CallbackCommand::BasketMessageToCaterer(rest_id) => format!("{}", db::is_success(basket::prepare_to_send_message(user_id, rest_id).await)),
-            CallbackCommand::BasketCancel(ticket_id) => format!("{}", db::is_success(cancel_ticket(&cx, user_id, ticket_id).await)),
-            CallbackCommand::BasketNext(ticket_id) => format!("{}", db::is_success(process_ticket(&cx, user_id, ticket_id).await)),
-         }*/
       }
    };
 
