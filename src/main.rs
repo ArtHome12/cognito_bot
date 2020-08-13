@@ -264,15 +264,23 @@ async fn chats_markup() -> InlineKeyboardMarkup {
    match client.query("SELECT chat_name FROM chats", &[]).await {
       Ok(rows) => {
          // Создадим кнопки
-         let buttons: Vec<InlineKeyboardButton> = rows.into_iter()
+         let mut buttons: Vec<InlineKeyboardButton> = rows.into_iter()
          .map(|row| (InlineKeyboardButton::callback(row.get(0), row.get(0)))).collect();
 
-         // Поделим по две в ряд
+         // Последняя непарная кнопка, если есть
+         let last = if buttons.len() % 2 == 1 { buttons.pop() } else { None };
+
+               // Поделим по две в ряд
          let markup = buttons.into_iter().array_chunks::<[_; 2]>()
          .fold(InlineKeyboardMarkup::default(), |acc, [left, right]| acc.append_row(vec![left, right]));
 
-         // Вернём результат
-         markup
+         // Добавляем последнюю непарную кнопку, если есть, а затем возвращаем результат
+         if let Some(last_button) = last {
+            markup.append_row(vec![last_button])
+         } else {
+            markup
+         }
+
       },
       _ => InlineKeyboardMarkup::default(),
    }
