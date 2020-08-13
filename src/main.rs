@@ -13,7 +13,7 @@ use teloxide::{
    utils::command::BotCommand,
    types::{ChatId,},
 };
-use std::{convert::Infallible, env, net::SocketAddr};
+use std::{convert::Infallible, env, net::SocketAddr, };
 use tokio::sync::mpsc;
 use warp::Filter;
 use reqwest::StatusCode;
@@ -36,52 +36,63 @@ enum Command {
    Unregister,
 }
 
-async fn handle_message(cx: cmd::Cx<cmd::Dialogue>) {
-// async fn answer(cx: UpdateWithCx<Message>, command: Command) -> ResponseResult<()> {
-    match command {
-      Command::Start => cx.answer("Добро пожаловать. Отправьте сообщение, выберите чат из списка зарегистрированных в боте и оно будет направлено на модерацию администратору чата (он не будет знать, от кого). Если администратор одобрит его публикацию, сообщение будет отправлено ботом в чат также анонимно. Все поддерживаемые команды: /help").send().await?,
-      Command::Help => cx.answer(Command::descriptions()).send().await?,
-      Command::Register(chat_name) => {
-         let res = if chat_name.is_empty() {String::from("После команды /register надо указать имя чата, например если имя вашего чата @your_chat, то введите вручную и отправьте отдельным сообщением /register @your_chat")}
-         else {
-            if &chat_name[..1] != "@" {format!("Имя чата должно начинаться со знака @, а вы ввели '{}'", chat_name)}
-            else {
-               // Пробуем отправить приветственное сообщение в чат
-               let chat_id = ChatId::ChannelUsername(chat_name.clone());
-               let res = cx.bot
-               .send_message(chat_id, "Приветствую вас. Я бот-анонимайзер, напишите мне в личку, я от своего имени перешлю сообщение админу и если он одобрит, я от своего имени перешлю его сюда и никто, кроме вас самого, не будет знать, от кого оно")
-               .send()
-               .await;
-               match res {
-                  Ok(_) => {
-                     // Всё хорошо, сохраним регистрацию
-                     let user_id = cx.update.from().unwrap().id;
-                     db_register(user_id, chat_name).await;
-                     String::from("Регистрация успешна. Если бот не сможет отправить сообщение в чат или его услугами не будут пользоваться более 3-х месяцев, информация о нём будет стёрта, но вы всегда сможете зарегистрировать его заново")
-                  }
-                  Err(e) => format!("Не удалось отправить сообщение в чат, возможно вы забыли меня в него добавить: {}", e)
+// async fn handle_message(cx: UpdateWithCx) {
+async fn handle_message(cx: UpdateWithCx<Message>) -> ResponseResult<Message> {
+
+   match cx.update.text() {
+      None => cx.answer_str("Текстовое сообщение, пожалуйста!").await,
+      Some(text) => {
+         // Попробуем получить команду
+         if let Ok(command) = Command::parse(text, "cognito_bot") {
+            match command {
+               Command::Start => cx.answer_str(String::from("Добро пожаловать. Отправьте сообщение, выберите чат из списка зарегистрированных в боте и оно будет направлено на модерацию администратору чата (он не будет знать, от кого). Если администратор одобрит его публикацию, сообщение будет отправлено ботом в чат также анонимно. Все поддерживаемые команды: /help")).await,
+               Command::Help => cx.answer_str(Command::descriptions()).await,
+               Command::Register(chat_name) => {
+                  let res = if chat_name.is_empty() {String::from("После команды /register надо указать имя чата, например если имя вашего чата @your_chat, то введите вручную и отправьте отдельным сообщением /register @your_chat")}
+                  else {
+                     if &chat_name[..1] != "@" {format!("Имя чата должно начинаться со знака @, а вы ввели '{}'", chat_name)}
+                     else {
+                        // Пробуем отправить приветственное сообщение в чат
+                        let chat_id = ChatId::ChannelUsername(chat_name.clone());
+                        let res = cx.bot
+                        .send_message(chat_id, "Приветствую вас. Я бот-анонимайзер, напишите мне в личку, я от своего имени перешлю сообщение админу и если он одобрит, я от своего имени перешлю его сюда и никто, кроме вас самого, не будет знать, от кого оно")
+                        .send()
+                        .await;
+                        match res {
+                           Ok(_) => {
+                              // Всё хорошо, сохраним регистрацию
+                              let user_id = cx.update.from().unwrap().id;
+                              db_register(user_id, chat_name).await;
+                              String::from("Регистрация успешна. Если бот не сможет отправить сообщение в чат или его услугами не будут пользоваться более 3-х месяцев, информация о нём будет стёрта, но вы всегда сможете зарегистрировать его заново")
+                           }
+                           Err(e) => format!("Не удалось отправить сообщение в чат, возможно вы забыли меня в него добавить: {}", e)
+                        }
+                     }
+                  };
+                  cx.answer_str(res).await
+               }
+               Command::Unregister => {
+                  let user_id = cx.update.from().unwrap().id;
+         
+                  // Проверим, что какой-нибудь чат был зарегистрирован
+                  let res = match db_user_chat_name(user_id).await {
+                     Some(chat_name) => {
+                        // Удаляем чат и сообщаем об этом
+                        db_unregister(user_id).await;
+                        format!("Информация о чате {} удалена", chat_name)
+                     }
+                     None => String::from("Зарегистрированного вами чата не числится, если вы его регистрировали, то возможно он был удалён автоматически при ошибке отправки в него сообщений или из-за долгого бездействия")
+                  };
+                  cx.answer_str(res).await
                }
             }
-         };
-         cx.answer_str(res).await?
+         } else {
+            cx.answer_str("Текстовое сообщение, пожалуйста!").await
+         }
       }
-      Command::Unregister => {
-         let user_id = cx.update.from().unwrap().id;
+   }
 
-         // Проверим, что какой-нибудь чат был зарегистрирован
-         let res = match db_user_chat_name(user_id).await {
-            Some(chat_name) => {
-               // Удаляем чат и сообщаем об этом
-               db_unregister(user_id).await;
-               format!("Информация о чате {} удалена", chat_name)
-            }
-            None => String::from("Зарегистрированного вами чата не числится, если вы его регистрировали, то возможно он был удалён автоматически при ошибке отправки в него сообщений или из-за долгого бездействия")
-         };
-         cx.answer_str(res).await?
-      }
-   };
-
-   Ok(())
+   // Ok(())
 }
 
 #[tokio::main]
@@ -178,10 +189,12 @@ async fn run() {
    check_database().await;
 
    // teloxide::commands_repl_with_listener(bot.clone(), "cognito_bot", answer, webhook(bot).await).await;
-   Dispatcher::new(Arc::clone(&bot))
-   .messages_handler(DispatcherHandler::new(|cx| async move {
-      handle_message(cx).await.expect("Something wrong with the bot!")
-   }))
+   Dispatcher::new(bot.clone())
+   .messages_handler(|rx: DispatcherHandlerRx<Message>| {
+      rx.for_each_concurrent(None, |message| async move {
+         handle_message(message).await.expect("Something wrong with the bot!");
+      })
+   })
    // .callback_queries_handler(handle_callback_query)
    .dispatch_with_listener(
       webhook(bot).await,
