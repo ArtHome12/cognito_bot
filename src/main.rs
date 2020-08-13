@@ -313,7 +313,9 @@ async fn handle_callback(cx: UpdateWithCx<CallbackQuery>) {
       }
       Some(data) => {
          // Получим текст сообщения
-         if let Some(message) = query.message.as_ref().and_then(|s| Message::text(&s)) {
+         if let Some(message) = query.message.as_ref()
+         .and_then(|s| Message::reply_to_message(&s))
+         .and_then(|s| Message::text(&s)) {
             // Код пользователя
             let user_id = query.from.id;
 
@@ -342,7 +344,7 @@ async fn handle_callback(cx: UpdateWithCx<CallbackQuery>) {
                         .edit_message_text(original_message, String::from("Сообщение находится на рассмотрении администратора чата и после его одобрения оно появится в чате"))
                         .send().
                         await;
-                        
+
                         match res {
                            Ok(_) => String::from("Успешно"),
                            Err(e) => format!("Ошибка  {}", e),
