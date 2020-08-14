@@ -225,7 +225,7 @@ async fn handle_callback(cx: UpdateWithCx<CallbackQuery>) {
          String::from("Error No data")
       }
       Some(data) => {
-         // Получим текст сообщения
+         // Если в сообщении с кнопкой было процитированное сообщение, получим его
          if let Some(message) = query.message.as_ref()
          .and_then(|s| Message::reply_to_message(&s))
          .and_then(|s| Message::text(&s)) {
@@ -270,7 +270,12 @@ async fn handle_callback(cx: UpdateWithCx<CallbackQuery>) {
                None => String::from("Error No admin")
             }
          } else {
-            String::from("Слишком старое сообщение")
+            // Возможно это было сообщение от админа
+            match data.as_str() {
+               "+" => String::from("Одобрено"),
+               "-" => String::from("Отклонено"),
+               _ => String::from("Слишком старое сообщение"),
+            }
          }
       }
    };
