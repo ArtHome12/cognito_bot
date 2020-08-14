@@ -232,6 +232,12 @@ async fn handle_callback(cx: UpdateWithCx<CallbackQuery>) {
             // Код пользователя
             let user_id = query.from.id;
 
+            // Ссылка сообщение для будущей правки
+            let original_message = ChatOrInlineMessage::Chat {
+               chat_id: ChatId::Id(i64::from(user_id)),
+               message_id: query.message.as_ref().unwrap().id,
+            };
+
             // Код администратора по имени чата
             let admin = db::user_id(data).await;
 
@@ -241,18 +247,12 @@ async fn handle_callback(cx: UpdateWithCx<CallbackQuery>) {
                   // Отправим сообщение администратору на модерацию
                   let chat_id = ChatId::Id(i64::from(id));
                   let res = cx.bot
-                  .send_message(chat_id, format!("Поступило сообщение\n{}", message))
+                  .send_message(chat_id, message)
                   .reply_markup(admin_markup())
                   .send()
                   .await;
                   match res {
                      Ok(_) => {
-                        // Ссылка на исправляемое сообщение
-                        let original_message = ChatOrInlineMessage::Chat {
-                           chat_id: ChatId::Id(i64::from(user_id)),
-                           message_id: query.message.as_ref().unwrap().id,
-                        };
-
                         // Отредактируем сообщение у пользователя
                         let res = cx.bot
                         .edit_message_text(original_message, String::from("Сообщение находится на рассмотрении администратора чата и после его одобрения оно появится в чате"))
@@ -272,7 +272,10 @@ async fn handle_callback(cx: UpdateWithCx<CallbackQuery>) {
          } else {
             // Возможно это было сообщение от админа
             match data.as_str() {
-               "+" => String::from("Одобрено"),
+               "+" => {
+                  // Отправим сообщение в чат
+                  String::from("Одобрено")
+               },
                "-" => String::from("Отклонено"),
                _ => String::from("Слишком старое сообщение"),
             }
