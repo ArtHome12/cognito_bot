@@ -19,13 +19,10 @@ use std::{convert::Infallible, env, net::SocketAddr, };
 use tokio::sync::mpsc;
 use warp::Filter;
 use reqwest::StatusCode;
-use once_cell::sync::{OnceCell};
 use tokio_postgres::{NoTls};
-use arraylib::iter::IteratorExt;
 
-
-// Клиент БД
-pub static DB: OnceCell<tokio_postgres::Client> = OnceCell::new();
+mod database;
+use database as db;
 
 #[derive(BotCommand)]
 #[command(rename = "lowercase", description = "Поддерживаются команды:")]
@@ -65,7 +62,7 @@ async fn handle_message(cx: UpdateWithCx<Message>) -> ResponseResult<Message> {
                            Ok(_) => {
                               // Всё хорошо, сохраним регистрацию
                               let user_id = cx.update.from().unwrap().id;
-                              db_register(user_id, chat_name).await;
+                              db::register(user_id, chat_name).await;
                               String::from("Регистрация успешна. Если бот не сможет отправить сообщение в чат или его услугами не будут пользоваться более 3-х месяцев, информация о нём будет стёрта, но вы всегда сможете зарегистрировать его заново")
                            }
                            Err(e) => format!("Не удалось отправить сообщение в чат, возможно вы забыли меня в него добавить: {}", e)
@@ -76,12 +73,12 @@ async fn handle_message(cx: UpdateWithCx<Message>) -> ResponseResult<Message> {
                }
                Command::Unregister => {
                   let user_id = cx.update.from().unwrap().id;
-         
+
                   // Проверим, что какой-нибудь чат был зарегистрирован
-                  let res = match db_user_chat_name(user_id).await {
+                  let res = match db::user_chat_name(user_id).await {
                      Some(chat_name) => {
                         // Удаляем чат и сообщаем об этом
-                        db_unregister(user_id).await;
+                        db::unregister(user_id).await;
                         format!("Информация о чате {} удалена", chat_name)
                      }
                      None => String::from("Зарегистрированного вами чата не числится, если вы его регистрировали, то возможно он был удалён автоматически при ошибке отправки в него сообщений или из-за долгого бездействия")
@@ -91,7 +88,7 @@ async fn handle_message(cx: UpdateWithCx<Message>) -> ResponseResult<Message> {
             }
          } else {
             cx.reply_to("Выберите чат для отправки")
-            .reply_markup(chats_markup().await)
+            .reply_markup(db::chats_markup().await)
             .send()
             .await
          }
@@ -125,7 +122,7 @@ pub async fn webhook<'a>(bot: Bot) -> impl update_listeners::UpdateListener<Infa
       .send()
       .await
       .expect("Cannot setup a webhook");
-   
+
    let (tx, rx) = mpsc::unbounded_channel();
 
    let server = warp::post()
@@ -161,7 +158,6 @@ pub async fn webhook<'a>(bot: Bot) -> impl update_listeners::UpdateListener<Infa
    rx
 }
 
-
 async fn run() {
    teloxide::enable_logging!();
    log::info!("Starting cognito_bot...");
@@ -184,13 +180,13 @@ async fn run() {
    });
 
    // Сохраним доступ к БД
-   match DB.set(client) {
+   match db::DB.set(client) {
       Ok(_) => log::info!("Database connected"),
       _ => log::info!("Something wrong with database"),
    }
 
    // Создадим таблицу в БД, если её ещё нет
-   check_database().await;
+   db::check_database().await;
 
    // teloxide::commands_repl_with_listener(bot.clone(), "cognito_bot", answer, webhook(bot).await).await;
    Dispatcher::new(bot.clone())
@@ -209,97 +205,14 @@ async fn run() {
       LoggingErrorHandler::with_custom_text("An error from the update listener"),
    )
    .await;
-
 }
 
-/// Создаёт таблицу, если её ещё не существует
-async fn check_database() {
-   // Получаем клиента БД
-   let client = DB.get().unwrap();
-
-   // Выполняем запрос
-   let rows = client.query("SELECT table_name FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME='chats'", &[]).await.unwrap();
-
-   // Если таблица не существует, создадим её
-   if rows.is_empty() {
-      client.execute("CREATE TABLE chats (
-         PRIMARY KEY (user_id),
-         user_id        INTEGER        NOT NULL,
-         chat_name      VARCHAR(100)   NOT NULL,
-         last_use       TIMESTAMP      NOT NULL
-      )", &[]).await.unwrap();
-   }
-}
-
-/// Регистрация чата для пользователя
-async fn db_register(user_id: i32, chat_name: String) {
-   let client = DB.get().unwrap();
-
-   // Удалим прежнюю информацию, если пользователь уже регистрировал чат
-   db_unregister(user_id).await;
-
-   // Добавляем новую запись, при ошибке сообщение в лог
-   if let Err(e) = client.execute("INSERT INTO chats (user_id, chat_name, last_use) VALUES ($1::INTEGER, $2::VARCHAR(100), NOW())", &[&user_id, &chat_name]).await {
-      log::error!("db_register({}, {}): {}", user_id, chat_name, e);
-   }
-}
-
-/// Удаление инормации о пользователе
-async fn db_unregister(user_id: i32) {
-   let client = DB.get().unwrap();
-   
-   // Выполняем запрос для удаления записи, при ошибке сообщение в лог
-   if let Err(e) = client.execute("DELETE FROM chats WHERE user_id = $1::INTEGER", &[&user_id]).await {
-      log::error!("db_unregister({}): {}", user_id, e);
-   }
-}
-
-/// Возвращает название чата для указанного пользователя
-async fn db_user_chat_name(user_id: i32) -> Option<String> {
-   let client = DB.get().unwrap();
-   let res = client.query_one("SELECT chat_name FROM chats WHERE user_id = $1::INTEGER", &[&user_id]).await;
-   match res {
-      Ok(data) => Some(data.get(0)),
-      _ => None,
-   }
-}
-
-/// Возвращает идентификатор админа чата
-async fn db_user_id(chat_name: &String) -> Option<i32> {
-   let client = DB.get().unwrap();
-   let res = client.query_one("SELECT user_id FROM chats WHERE chat_name = $1::VARCHAR(100)", &[&chat_name]).await;
-   match res {
-      Ok(data) => Some(data.get(0)),
-      _ => None,
-   }
-}
-
-/// Возвращает список кнопок с чатами
-async fn chats_markup() -> InlineKeyboardMarkup {
-   let client = DB.get().unwrap();
-   match client.query("SELECT chat_name FROM chats", &[]).await {
-      Ok(rows) => {
-         // Создадим кнопки
-         let mut buttons: Vec<InlineKeyboardButton> = rows.into_iter()
-         .map(|row| (InlineKeyboardButton::callback(row.get(0), row.get(0)))).collect();
-
-         // Последняя непарная кнопка, если есть
-         let last = if buttons.len() % 2 == 1 { buttons.pop() } else { None };
-
-               // Поделим по две в ряд
-         let markup = buttons.into_iter().array_chunks::<[_; 2]>()
-         .fold(InlineKeyboardMarkup::default(), |acc, [left, right]| acc.append_row(vec![left, right]));
-
-         // Добавляем последнюю непарную кнопку, если есть, а затем возвращаем результат
-         if let Some(last_button) = last {
-            markup.append_row(vec![last_button])
-         } else {
-            markup
-         }
-
-      },
-      _ => InlineKeyboardMarkup::default(),
-   }
+/// Возвращает кнопки для администратора
+fn admin_markup() -> InlineKeyboardMarkup {
+   InlineKeyboardMarkup::default()
+   .append_row(vec![InlineKeyboardButton::callback(String::from("🗸"), String::from("+")),
+      InlineKeyboardButton::callback(String::from("🗴"), String::from("-")),
+   ])
 }
 
 async fn handle_callback(cx: UpdateWithCx<CallbackQuery>) {
@@ -320,7 +233,7 @@ async fn handle_callback(cx: UpdateWithCx<CallbackQuery>) {
             let user_id = query.from.id;
 
             // Код администратора по имени чата
-            let admin = db_user_id(data).await;
+            let admin = db::user_id(data).await;
 
             match admin {
                Some(id) => {
@@ -329,6 +242,7 @@ async fn handle_callback(cx: UpdateWithCx<CallbackQuery>) {
                   let chat_id = ChatId::Id(i64::from(id));
                   let res = cx.bot
                   .send_message(chat_id, format!("Поступило сообщение\n{}", message))
+                  .reply_markup(admin_markup())
                   .send()
                   .await;
                   match res {
