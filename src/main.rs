@@ -286,7 +286,7 @@ async fn handle_callback(cx: UpdateWithCx<CallbackQuery>) {
                      let chat_name = db::user_chat_name(user_id).await.unwrap_or_default();
 
                      // Код чата
-                     let chat_id = ChatId::ChannelUsername(String::from("chat_name"));
+                     let chat_id = ChatId::ChannelUsername(chat_name);
                      
                      // Отправляем сообщение
                      let res = cx.bot
