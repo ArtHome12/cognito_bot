@@ -222,6 +222,12 @@ async fn handle_callback(cx: UpdateWithCx<CallbackQuery>) {
    // Код пользователя
    let user_id = query.from.id;
 
+   // Ссылка сообщение для будущей правки
+   let original_message = ChatOrInlineMessage::Chat {
+      chat_id: ChatId::Id(i64::from(user_id)),
+      message_id: query.message.as_ref().unwrap().id,
+   };
+
    // Сообщение для отправки обратно
    let msg = match &query.data {
       None => {
@@ -232,12 +238,6 @@ async fn handle_callback(cx: UpdateWithCx<CallbackQuery>) {
          if let Some(message) = query.message.as_ref()
          .and_then(|s| Message::reply_to_message(&s))
          .and_then(|s| Message::text(&s)) {
-            // Ссылка сообщение для будущей правки
-            let original_message = ChatOrInlineMessage::Chat {
-               chat_id: ChatId::Id(i64::from(user_id)),
-               message_id: query.message.as_ref().unwrap().id,
-            };
-
             // Код администратора по имени чата
             let admin = db::user_id(data).await;
 
@@ -276,11 +276,17 @@ async fn handle_callback(cx: UpdateWithCx<CallbackQuery>) {
                   // Отправим сообщение в чат
                   if let Some(message) = query.message.as_ref()
                   .and_then(|s| Message::text(&s)) {
+                     // Отредактируем сообщение у администратора, ошибку игнорируем
+                     let _= cx.bot
+                     .edit_message_text(original_message, format!("Одобрено:\n{}", message))
+                     .send()
+                     .await;
+
                      // Получим имя чата по коду пользователя
                      let chat_name = db::user_chat_name(user_id).await.unwrap_or_default();
 
                      // Код чата
-                     let chat_id = ChatId::ChannelUsername(chat_name);
+                     let chat_id = ChatId::ChannelUsername(String::from("chat_name"));
                      
                      // Отправляем сообщение
                      let res = cx.bot
@@ -294,7 +300,17 @@ async fn handle_callback(cx: UpdateWithCx<CallbackQuery>) {
                      }
                   } else {String::from("Ошибка, нет сообщения")}
                },
-               "-" => String::from("Отклонено"),
+               "-" => {
+                  // Отредактируем сообщение у администратора, ошибку игнорируем
+                  if let Some(message) = query.message.as_ref()
+                  .and_then(|s| Message::text(&s)) {
+                     let _= cx.bot
+                     .edit_message_text(original_message, format!("Отклонено:\n{}", message))
+                     .send()
+                     .await;
+                  }
+                  String::from("Отклонено")
+               },
                _ => String::from("Слишком старое сообщение"),
             }
          }
