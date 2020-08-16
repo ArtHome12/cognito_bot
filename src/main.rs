@@ -39,6 +39,14 @@ enum Command {
 // async fn handle_message(cx: UpdateWithCx) {
 async fn handle_message(cx: UpdateWithCx<Message>) -> ResponseResult<Message> {
 
+   // Для различения, в личку или в группу пишут
+   let chat_id = cx.update.chat_id();
+
+   // Обрабатываем сообщение, только если оно пришло в личку
+   if chat_id < 0 {
+      return Ok(cx.update);
+   }
+   
    match cx.update.text() {
       None => cx.answer_str("Текстовое сообщение, пожалуйста!").await,
       Some(text) => {
