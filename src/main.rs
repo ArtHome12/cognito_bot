@@ -274,7 +274,11 @@ async fn handle_callback(cx: UpdateWithCx<CallbackQuery>) {
             match data.as_str() {
                "+" => {
                   // Отправим сообщение в чат
-                  String::from("Одобрено")
+                  if let Some(message) = query.message.as_ref()
+                  .and_then(|s| Message::text(&s)) {
+                     String::from(message)
+                     // String::from("Одобрено")
+                  } else {String::from("Ошибка, нет сообщения")}
                },
                "-" => String::from("Отклонено"),
                _ => String::from("Слишком старое сообщение"),
