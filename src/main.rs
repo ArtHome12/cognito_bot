@@ -210,14 +210,17 @@ async fn run() {
 /// Возвращает кнопки для администратора
 fn admin_markup() -> InlineKeyboardMarkup {
    InlineKeyboardMarkup::default()
-   .append_row(vec![InlineKeyboardButton::callback(String::from("🗸"), String::from("+")),
-      InlineKeyboardButton::callback(String::from("🗴"), String::from("-")),
+   .append_row(vec![InlineKeyboardButton::callback(String::from("🗸 Одобрить"), String::from("+")),
+      InlineKeyboardButton::callback(String::from("🗴 Отклонить"), String::from("-")),
    ])
 }
 
 async fn handle_callback(cx: UpdateWithCx<CallbackQuery>) {
    let query = &cx.update;
    let query_id = &query.id;
+
+   // Код пользователя
+   let user_id = query.from.id;
 
    // Сообщение для отправки обратно
    let msg = match &query.data {
@@ -229,9 +232,6 @@ async fn handle_callback(cx: UpdateWithCx<CallbackQuery>) {
          if let Some(message) = query.message.as_ref()
          .and_then(|s| Message::reply_to_message(&s))
          .and_then(|s| Message::text(&s)) {
-            // Код пользователя
-            let user_id = query.from.id;
-
             // Ссылка сообщение для будущей правки
             let original_message = ChatOrInlineMessage::Chat {
                chat_id: ChatId::Id(i64::from(user_id)),
@@ -276,8 +276,22 @@ async fn handle_callback(cx: UpdateWithCx<CallbackQuery>) {
                   // Отправим сообщение в чат
                   if let Some(message) = query.message.as_ref()
                   .and_then(|s| Message::text(&s)) {
-                     String::from(message)
-                     // String::from("Одобрено")
+                     // Получим имя чата по коду пользователя
+                     let chat_name = db::user_chat_name(user_id).await.unwrap_or_default();
+
+                     // Код чата
+                     let chat_id = ChatId::ChannelUsername(chat_name);
+                     
+                     // Отправляем сообщение
+                     let res = cx.bot
+                     .send_message(chat_id, message)
+                     .send()
+                     .await;
+
+                     match res {
+                        Ok(_) => String::from("Одобрено"),
+                        Err(e) => format!("Ошибка {}", e),
+                     }
                   } else {String::from("Ошибка, нет сообщения")}
                },
                "-" => String::from("Отклонено"),
