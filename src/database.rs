@@ -107,3 +107,35 @@ pub async fn chats_markup() -> InlineKeyboardMarkup {
    }
 }
 
+/// Увеличивает счётчик ошибок и если стало слишком много, удаляет чат
+/// Функция должна вызываться при каждой ошибке отправки сообщения админу или в чат
+pub async fn error_happened(user_id: i32) {
+   let client = DB.get().unwrap();
+
+   // Увеличиваем счётчик ошибок
+   if let Err(e) = client.execute("UPDATE chats SET errors = errors + 1 WHERE user_id = $1::INTEGER", &[&user_id]).await {
+      log::error!("error_happened({}): {}", user_id, e);
+      return;
+   };
+
+   // Читаем счётчик ошибок
+   let res = client.query_one("SELECT errors FROM chats WHERE user_id = $1::INTEGER", &[&user_id]).await;
+   match res {
+      Ok(data) => {
+         // Если ошибок слишком много, забываем чат
+         let cnt: i32 = data.get(0);
+         if cnt > 2 {unregister(user_id).await;}
+      }
+      // При ошибке сообщаем в лог и выходим
+      Err(e) => log::error!("error_happened 2 ({}): {}", user_id, e),
+   }
+}
+
+/// Обнуляет счётчик ошибок отправки сообщений
+/// Функция должна вызываеться после каждой успешной попытки
+pub async fn successful_sent(user_id: i32) {
+   let client = DB.get().unwrap();
+   if let Err(e) = client.execute("UPDATE chats SET errors = 0 WHERE user_id = $1::INTEGER", &[&user_id]).await {
+      log::error!("successful_sent({}): {}", user_id, e);
+   };
+}

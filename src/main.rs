@@ -232,7 +232,7 @@ fn admin_markup() -> InlineKeyboardMarkup {
 
 // Для хранения отложенного сообщения администратору чата
 struct MsgToAdmin {
-   pub chat_id: ChatId,
+   pub id: i32,
    pub message: String,
    pub delay: u32,
 }
@@ -270,11 +270,11 @@ async fn handle_callback(cx: UpdateWithCx<CallbackQuery>) {
                Some(id) => {
 
                   // Время задержки
-                  let delay = rand::thread_rng().gen_range(3, 723);
+                  let delay = rand::thread_rng().gen_range(3, 23);
 
                   // Приготовим для отправки сообщение администратору на модерацию
                   msg_to_admin = Some(MsgToAdmin{
-                     chat_id: ChatId::Id(i64::from(id)),
+                     id,
                      message: String::from(message),
                      delay,
                   });
@@ -318,8 +318,14 @@ async fn handle_callback(cx: UpdateWithCx<CallbackQuery>) {
                      .await;
 
                      match res {
-                        Ok(_) => String::from("Одобрено"),
-                        Err(e) => format!("Ошибка {}", e),
+                        Ok(_) => {
+                           db::successful_sent(user_id).await;
+                           String::from("Одобрено")
+                        },
+                        Err(e) => {
+                           db::error_happened(user_id).await;
+                           format!("Ошибка {}", e)
+                        },
                      }
                   } else {String::from("Ошибка, нет сообщения")}
                },
@@ -355,10 +361,17 @@ async fn handle_callback(cx: UpdateWithCx<CallbackQuery>) {
       delay_for(Duration::from_secs(u64::from(msg.delay))).await;
 
       // Отправляем сообщение админу
-      let _res = cx.bot
-      .send_message(msg.chat_id, msg.message)
+      let res = cx.bot
+      .send_message(ChatId::Id(i64::from(msg.id)), msg.message)
       .reply_markup(admin_markup())
       .send()
       .await;
+
+      // Фиксируем ошибку, если была
+      if res.is_err() {
+         db::error_happened(msg.id).await;
+      } else {
+         db::successful_sent(msg.id).await;
+      }
    }
 }
