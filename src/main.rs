@@ -20,6 +20,7 @@ use tokio::sync::mpsc;
 use warp::Filter;
 use reqwest::StatusCode;
 use tokio_postgres::{NoTls};
+use rand::Rng;
 
 mod database;
 use database as db;
@@ -228,6 +229,13 @@ fn admin_markup() -> InlineKeyboardMarkup {
    ])
 }
 
+// Для хранения отложенного сообщения администратору чата
+struct MsgToAdmin {
+   pub chat_id: ChatId,
+   pub message: String,
+   pub delay: u32,
+}
+
 async fn handle_callback(cx: UpdateWithCx<CallbackQuery>) {
    let query = &cx.update;
    let query_id = &query.id;
@@ -240,6 +248,9 @@ async fn handle_callback(cx: UpdateWithCx<CallbackQuery>) {
       chat_id: ChatId::Id(i64::from(user_id)),
       message_id: query.message.as_ref().unwrap().id,
    };
+
+   // Отложенное сообщение администратору чата
+   let mut msg_to_admin: Option<MsgToAdmin> = None;
 
    // Сообщение для отправки обратно
    let msg = match &query.data {
@@ -257,27 +268,25 @@ async fn handle_callback(cx: UpdateWithCx<CallbackQuery>) {
             match admin {
                Some(id) => {
 
-                  // Отправим сообщение администратору на модерацию
-                  let chat_id = ChatId::Id(i64::from(id));
-                  let res = cx.bot
-                  .send_message(chat_id, message)
-                  .reply_markup(admin_markup())
-                  .send()
-                  .await;
-                  match res {
-                     Ok(_) => {
-                        // Отредактируем сообщение у пользователя
-                        let res = cx.bot
-                        .edit_message_text(original_message, String::from("Сообщение находится на рассмотрении администратора чата и после его одобрения оно появится в чате"))
-                        .send().
-                        await;
+                  // Время задержки
+                  let delay = rand::thread_rng().gen_range(3, 723);
 
-                        match res {
-                           Ok(_) => String::from("Успешно"),
-                           Err(e) => format!("Ошибка  {}", e),
-                        }
-                     }
-                     Err(e) => format!("Ошибка: {}", e)
+                  // Приготовим для отправки сообщение администратору на модерацию
+                  msg_to_admin = Some(MsgToAdmin{
+                     chat_id: ChatId::Id(i64::from(id)),
+                     message: String::from(message),
+                     delay,
+                  });
+
+                  // Отредактируем сообщение у пользователя
+                  let res = cx.bot
+                  .edit_message_text(original_message, format!("Сообщение через {} сек. (для маскировки онлайн-активности) будет направлено на рассмотрении администратору чата и после его одобрения оно появится в чате", delay))
+                  .send().
+                  await;
+
+                  match res {
+                     Ok(_) => String::from("Успешно"),
+                     Err(e) => format!("Ошибка  {}", e),
                   }
                },
                None => String::from("Error No admin")
@@ -337,5 +346,14 @@ async fn handle_callback(cx: UpdateWithCx<CallbackQuery>) {
       .await {
          Err(_) => log::info!("Error handle_message {}", &msg),
          _ => (),
+   }
+
+   // Если приготовлено отложенное сообщение, надо отправить его
+   if let Some(msg) = msg_to_admin {
+      let _res = cx.bot
+      .send_message(msg.chat_id, msg.message)
+      .reply_markup(admin_markup())
+      .send()
+      .await;
    }
 }

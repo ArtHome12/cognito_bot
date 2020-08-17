@@ -30,7 +30,8 @@ pub async fn check_database() {
          PRIMARY KEY (user_id),
          user_id        INTEGER        NOT NULL,
          chat_name      VARCHAR(100)   NOT NULL,
-         last_use       TIMESTAMP      NOT NULL
+         last_use       TIMESTAMP      NOT NULL,
+         errors         INTEGER        NOT NULL
       )", &[]).await.unwrap();
    }
 }
@@ -43,7 +44,7 @@ pub async fn register(user_id: i32, chat_name: String) {
    unregister(user_id).await;
 
    // Добавляем новую запись, при ошибке сообщение в лог
-   if let Err(e) = client.execute("INSERT INTO chats (user_id, chat_name, last_use) VALUES ($1::INTEGER, $2::VARCHAR(100), NOW())", &[&user_id, &chat_name]).await {
+   if let Err(e) = client.execute("INSERT INTO chats (user_id, chat_name, last_use, errors) VALUES ($1::INTEGER, $2::VARCHAR(100), NOW(), 0)", &[&user_id, &chat_name]).await {
       log::error!("db_register({}, {}): {}", user_id, chat_name, e);
    }
 }
