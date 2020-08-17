@@ -132,7 +132,9 @@ pub async fn error_happened(user_id: i32) {
 }
 
 /// Обнуляет счётчик ошибок отправки сообщений
-/// Функция должна вызываеться после каждой успешной попытки
+/// Функция должна вызываеться после каждой успешной попытки записи в чат, но не при
+/// успешной отправке сообщения админу, иначе это сбросит более приоритетный счётчик
+/// ошибок в чат
 pub async fn successful_sent(user_id: i32) {
    let client = DB.get().unwrap();
    if let Err(e) = client.execute("UPDATE chats SET errors = 0 WHERE user_id = $1::INTEGER", &[&user_id]).await {

@@ -367,11 +367,9 @@ async fn handle_callback(cx: UpdateWithCx<CallbackQuery>) {
       .send()
       .await;
 
-      // Фиксируем ошибку, если была
+      // Фиксируем ошибку, если была, при этом не фиксируем успешную отправку, чтобы не обнулить счётчик отправок в чат
       if res.is_err() {
          db::error_happened(msg.id).await;
-      } else {
-         db::successful_sent(msg.id).await;
       }
    }
 }
