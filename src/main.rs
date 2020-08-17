@@ -16,7 +16,8 @@ use teloxide::{
    },
 };
 use std::{convert::Infallible, env, net::SocketAddr, };
-use tokio::sync::mpsc;
+use tokio::{sync::mpsc, time::delay_for,};
+use std::time::Duration;
 use warp::Filter;
 use reqwest::StatusCode;
 use tokio_postgres::{NoTls};
@@ -350,6 +351,10 @@ async fn handle_callback(cx: UpdateWithCx<CallbackQuery>) {
 
    // Если приготовлено отложенное сообщение, надо отправить его
    if let Some(msg) = msg_to_admin {
+      // Выжидаем паузу
+      delay_for(Duration::from_secs(u64::from(msg.delay))).await;
+
+      // Отправляем сообщение админу
       let _res = cx.bot
       .send_message(msg.chat_id, msg.message)
       .reply_markup(admin_markup())
