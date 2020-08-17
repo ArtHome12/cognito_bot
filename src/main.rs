@@ -270,7 +270,7 @@ async fn handle_callback(cx: UpdateWithCx<CallbackQuery>) {
                Some(id) => {
 
                   // Время задержки
-                  let delay = rand::thread_rng().gen_range(3, 23);
+                  let delay = rand::thread_rng().gen_range(3, 723);
 
                   // Приготовим для отправки сообщение администратору на модерацию
                   msg_to_admin = Some(MsgToAdmin{

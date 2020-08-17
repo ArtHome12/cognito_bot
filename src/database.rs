@@ -124,7 +124,7 @@ pub async fn error_happened(user_id: i32) {
       Ok(data) => {
          // Если ошибок слишком много, забываем чат
          let cnt: i32 = data.get(0);
-         if cnt > 2 {unregister(user_id).await;}
+         if cnt > 3 {unregister(user_id).await;}
       }
       // При ошибке сообщаем в лог и выходим
       Err(e) => log::error!("error_happened 2 ({}): {}", user_id, e),
