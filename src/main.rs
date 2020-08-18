@@ -60,7 +60,7 @@ async fn handle_message(cx: UpdateWithCx<Message>) -> ResponseResult<Message> {
                Command::Register(chat_name) => {
                   let res = if chat_name.is_empty() {String::from("После команды /register надо указать имя чата, например если имя вашего чата @your_chat, то введите вручную и отправьте отдельным сообщением /register @your_chat")}
                   else {
-                     if &chat_name[..1] != "@" {format!("Имя чата должно начинаться со знака @, а вы ввели '{}'", chat_name)}
+                     if chat_name.get(0..1).unwrap_or_default() != "@" {format!("Имя чата должно начинаться со знака @, а вы ввели '{}'", chat_name)}
                      else {
                         // Если чат с таким именем уже зарегистрирован, сообщим об ошибке
                         if db::user_id(&chat_name.clone()).await.is_some() {
@@ -180,7 +180,7 @@ async fn run() {
    let bot = Bot::from_env();
 
    // Логин к БД
-   let database_url = env::var("DATABASE_URL").expect("DATABASE_URL env variable missing");    
+   let database_url = env::var("DATABASE_URL").expect("DATABASE_URL env variable missing");
    // Откроем БД
    let (client, connection) =
       tokio_postgres::connect(&database_url, NoTls).await
