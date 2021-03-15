@@ -187,6 +187,7 @@ async fn run() {
 
    let connector = TlsConnector::builder()
    // .add_root_certificate(cert)
+   .danger_accept_invalid_certs(true)
    .build().unwrap();
    let connector = MakeTlsConnector::new(connector);
 
