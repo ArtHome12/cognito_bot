@@ -8,20 +8,18 @@ Copyright (c) 2020 by Artem Khomenko _mag12@yahoo.com.
 =============================================================================== */
 
 use teloxide::{
-   dispatching::update_listeners,
    prelude::*,
    utils::command::BotCommand,
-   types::{ChatId, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, 
-      ChatOrInlineMessage,
-   },
+   types::{ChatId, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery,},
+   requests::ResponseResult,
+   dispatching::{update_listeners::{self, StatefulListener}, stop_token::AsyncStopToken}
 };
 use std::{convert::Infallible, env, net::SocketAddr, };
-use tokio::{sync::mpsc, time::delay_for,};
-use std::time::Duration;
+use tokio::{sync::mpsc, time::{sleep, Duration}};
+use tokio_stream::wrappers::UnboundedReceiverStream;
 use warp::Filter;
-use reqwest::StatusCode;
+use reqwest::{StatusCode, Url};
 use rand::Rng;
-// use tokio_postgres::{NoTls};
 use native_tls::{TlsConnector};
 use postgres_native_tls::MakeTlsConnector;
 
@@ -40,8 +38,7 @@ enum Command {
    Unregister,
 }
 
-// async fn handle_message(cx: UpdateWithCx) {
-async fn handle_message(cx: UpdateWithCx<Message>) -> ResponseResult<Message> {
+async fn handle_message(cx: UpdateWithCx<AutoSend<Bot>, Message>) -> ResponseResult<Message> {
 
    // Для различения, в личку или в группу пишут
    let chat_id = cx.update.chat_id();
@@ -52,13 +49,13 @@ async fn handle_message(cx: UpdateWithCx<Message>) -> ResponseResult<Message> {
    }
    
    match cx.update.text() {
-      None => cx.answer_str("Текстовое сообщение, пожалуйста!").await,
+      None => cx.answer("Текстовое сообщение, пожалуйста!").await,
       Some(text) => {
          // Попробуем получить команду
          if let Ok(command) = Command::parse(text, "cognito_bot") {
             match command {
-               Command::Start => cx.answer_str(String::from("Добро пожаловать. Отправьте сообщение, выберите чат из списка зарегистрированных в боте и оно будет направлено на модерацию администратору чата (он не будет знать, от кого). Если администратор одобрит его публикацию, сообщение будет отправлено ботом в чат также анонимно. Все поддерживаемые команды: /help")).await,
-               Command::Help => cx.answer_str(Command::descriptions()).await,
+               Command::Start => cx.answer(String::from("Добро пожаловать. Отправьте сообщение, выберите чат из списка зарегистрированных в боте и оно будет направлено на модерацию администратору чата (он не будет знать, от кого). Если администратор одобрит его публикацию, сообщение будет отправлено ботом в чат также анонимно. Все поддерживаемые команды: /help")).await,
+               Command::Help => cx.answer(Command::descriptions()).await,
                Command::Register(chat_name) => {
                   let res = if chat_name.is_empty() {String::from("После команды /register надо указать имя чата, например если имя вашего чата @your_chat, то введите вручную и отправьте отдельным сообщением /register @your_chat")}
                   else {
@@ -70,7 +67,7 @@ async fn handle_message(cx: UpdateWithCx<Message>) -> ResponseResult<Message> {
                         } else {
                            // Пробуем отправить приветственное сообщение в чат
                            let chat_id = ChatId::ChannelUsername(chat_name.clone());
-                           let res = cx.bot
+                           let res = cx.requester
                            .send_message(chat_id, "Приветствую вас. Я бот-анонимайзер, напишите мне в личку, я от своего имени перешлю сообщение админу и если он одобрит, я от своего имени перешлю его сюда и никто, кроме вас самого, не будет знать, от кого оно")
                            .send()
                            .await;
@@ -86,7 +83,7 @@ async fn handle_message(cx: UpdateWithCx<Message>) -> ResponseResult<Message> {
                         }
                      }
                   };
-                  cx.answer_str(res).await
+                  cx.answer(res).await
                }
                Command::Unregister => {
                   let user_id = cx.update.from().unwrap().id;
@@ -100,7 +97,7 @@ async fn handle_message(cx: UpdateWithCx<Message>) -> ResponseResult<Message> {
                      }
                      None => String::from("Зарегистрированного вами чата не числится, если вы его регистрировали, то возможно он был удалён автоматически при ошибке отправки в него сообщений или из-за долгого бездействия")
                   };
-                  cx.answer_str(res).await
+                  cx.answer(res).await
                }
             }
          } else {
@@ -123,7 +120,7 @@ async fn handle_rejection(error: warp::Rejection) -> Result<impl warp::Reply, In
    Ok(StatusCode::INTERNAL_SERVER_ERROR)
 }
 
-pub async fn webhook<'a>(bot: Bot) -> impl update_listeners::UpdateListener<Infallible> {
+pub async fn webhook<'a>(bot: AutoSend<Bot>) -> impl update_listeners::UpdateListener<Infallible> {
    // Heroku defines auto defines a port value
    let teloxide_token = env::var("TELOXIDE_TOKEN").expect("TELOXIDE_TOKEN env variable missing");
    let port: u16 = env::var("PORT")
@@ -133,7 +130,8 @@ pub async fn webhook<'a>(bot: Bot) -> impl update_listeners::UpdateListener<Infa
    // Heroku host example .: "heroku-ping-pong-bot.herokuapp.com"
    let host = env::var("HOST").expect("have HOST env variable");
    let path = format!("bot{}", teloxide_token);
-   let url = format!("https://{}/{}", host, path);
+   let url =  Url::parse(&format!("https://{}/{}", host, path))
+   .unwrap();
 
    bot.set_webhook(url)
       .send()
@@ -168,18 +166,28 @@ pub async fn webhook<'a>(bot: Bot) -> impl update_listeners::UpdateListener<Infa
       })
       .recover(handle_rejection);
 
-   let serve = warp::serve(server);
+   let (stop_token, stop_flag) = AsyncStopToken::new_pair();
 
-   let address = format!("0.0.0.0:{}", port);
-   tokio::spawn(serve.run(address.parse::<SocketAddr>().unwrap()));
-   rx
+   let addr = format!("0.0.0.0:{}", port).parse::<SocketAddr>().unwrap();
+   let server = warp::serve(server);
+   let (_addr, fut) = server.bind_with_graceful_shutdown(addr, stop_flag);
+
+   // You might want to use serve.key_path/serve.cert_path methods here to
+   // setup a self-signed TLS certificate.
+
+   tokio::spawn(fut);
+   let stream = UnboundedReceiverStream::new(rx);
+
+   fn streamf<S, T>(state: &mut (S, T)) -> &mut S { &mut state.0 }
+   
+   StatefulListener::new((stream, stop_token), streamf, |state: &mut (_, AsyncStopToken)| state.1.clone())
 }
 
 async fn run() {
    teloxide::enable_logging!();
    log::info!("Starting cognito_bot...");
 
-   let bot = Bot::from_env();
+   let bot = Bot::from_env().auto_send();
 
    // Логин к БД
    let database_url = env::var("DATABASE_URL").expect("DATABASE_URL env variable missing");
@@ -213,18 +221,9 @@ async fn run() {
    // Создадим таблицу в БД, если её ещё нет
    db::check_database().await;
 
-   // teloxide::commands_repl_with_listener(bot.clone(), "cognito_bot", answer, webhook(bot).await).await;
    Dispatcher::new(bot.clone())
-   .messages_handler(|rx: DispatcherHandlerRx<Message>| {
-      rx.for_each_concurrent(None, |message| async move {
-         handle_message(message).await.expect("Something wrong with the bot!");
-      })
-   })
-   .callback_queries_handler(|rx: DispatcherHandlerRx<CallbackQuery>| {
-      rx.for_each_concurrent(None, |cx| async move {
-         handle_callback(cx).await
-      })
-   })
+   .messages_handler(handle_message_query)
+   .callback_queries_handler(handle_callback_query)
    .dispatch_with_listener(
       webhook(bot).await,
       LoggingErrorHandler::with_custom_text("An error from the update listener"),
@@ -232,7 +231,23 @@ async fn run() {
    .await;
 }
 
-/// Возвращает кнопки для администратора
+async fn handle_callback_query(rx: DispatcherHandlerRx<AutoSend<Bot>, CallbackQuery>) {
+   UnboundedReceiverStream::new(rx)
+   .for_each_concurrent(None, |cx| async move {
+      handle_callback(cx).await
+    })
+   .await;
+}
+
+ async fn handle_message_query(rx: DispatcherHandlerRx<AutoSend<Bot>, Message>) {
+   UnboundedReceiverStream::new(rx)
+   .for_each_concurrent(None, |cx| async move {
+      handle_message(cx).await.expect("Something wrong with the bot!");
+   })
+   .await;
+}
+
+// Возвращает кнопки для администратора
 fn admin_markup() -> InlineKeyboardMarkup {
    InlineKeyboardMarkup::default()
    .append_row(vec![InlineKeyboardButton::callback(String::from("🗸 Одобрить"), String::from("+")),
@@ -242,12 +257,12 @@ fn admin_markup() -> InlineKeyboardMarkup {
 
 // Для хранения отложенного сообщения администратору чата
 struct MsgToAdmin {
-   pub id: i32,
+   pub id: i64,
    pub message: String,
    pub delay: u32,
 }
 
-async fn handle_callback(cx: UpdateWithCx<CallbackQuery>) {
+async fn handle_callback(cx: UpdateWithCx<AutoSend<Bot>, CallbackQuery>) {
    let query = &cx.update;
    let query_id = &query.id;
 
@@ -255,10 +270,7 @@ async fn handle_callback(cx: UpdateWithCx<CallbackQuery>) {
    let user_id = query.from.id;
 
    // Ссылка сообщение для будущей правки
-   let original_message = ChatOrInlineMessage::Chat {
-      chat_id: ChatId::Id(i64::from(user_id)),
-      message_id: query.message.as_ref().unwrap().id,
-   };
+   let message_id = query.message.as_ref().unwrap().id;
 
    // Отложенное сообщение администратору чата
    let mut msg_to_admin: Option<MsgToAdmin> = None;
@@ -290,8 +302,8 @@ async fn handle_callback(cx: UpdateWithCx<CallbackQuery>) {
                   });
 
                   // Отредактируем сообщение у пользователя
-                  let res = cx.bot
-                  .edit_message_text(original_message, format!("Сообщение через {} сек. (для маскировки онлайн-активности) будет направлено на рассмотрении администратору чата и после его одобрения оно появится в чате", delay))
+                  let res = cx.requester
+                  .edit_message_text(user_id, message_id, format!("Сообщение через {} сек. (для маскировки онлайн-активности) будет направлено на рассмотрении администратору чата и после его одобрения оно появится в чате", delay))
                   .send().
                   await;
 
@@ -310,8 +322,8 @@ async fn handle_callback(cx: UpdateWithCx<CallbackQuery>) {
                   if let Some(message) = query.message.as_ref()
                   .and_then(|s| Message::text(&s)) {
                      // Отредактируем сообщение у администратора, ошибку игнорируем
-                     let _= cx.bot
-                     .edit_message_text(original_message, format!("Одобрено:\n{}", message))
+                     let _= cx.requester
+                     .edit_message_text(user_id, message_id, format!("Одобрено:\n{}", message))
                      .send()
                      .await;
 
@@ -322,7 +334,7 @@ async fn handle_callback(cx: UpdateWithCx<CallbackQuery>) {
                      let chat_id = ChatId::ChannelUsername(chat_name);
                      
                      // Отправляем сообщение
-                     let res = cx.bot
+                     let res = cx.requester
                      .send_message(chat_id, message)
                      .send()
                      .await;
@@ -343,8 +355,8 @@ async fn handle_callback(cx: UpdateWithCx<CallbackQuery>) {
                   // Отредактируем сообщение у администратора, ошибку игнорируем
                   if let Some(message) = query.message.as_ref()
                   .and_then(|s| Message::text(&s)) {
-                     let _= cx.bot
-                     .edit_message_text(original_message, format!("Отклонено:\n{}", message))
+                     let _= cx.requester
+                     .edit_message_text(user_id, message_id, format!("Отклонено:\n{}", message))
                      .send()
                      .await;
                   }
@@ -357,7 +369,7 @@ async fn handle_callback(cx: UpdateWithCx<CallbackQuery>) {
    };
 
    // Отправляем ответ, который показывается во всплывающем окошке
-   match cx.bot.answer_callback_query(query_id)
+   match cx.requester.answer_callback_query(query_id)
       .text(&msg)
       .send()
       .await {
@@ -368,11 +380,11 @@ async fn handle_callback(cx: UpdateWithCx<CallbackQuery>) {
    // Если приготовлено отложенное сообщение, надо отправить его
    if let Some(msg) = msg_to_admin {
       // Выжидаем паузу
-      delay_for(Duration::from_secs(u64::from(msg.delay))).await;
+      sleep(Duration::from_secs(u64::from(msg.delay))).await;
 
       // Отправляем сообщение админу
-      let res = cx.bot
-      .send_message(ChatId::Id(i64::from(msg.id)), msg.message)
+      let res = cx.requester
+      .send_message(ChatId::Id(msg.id), msg.message)
       .reply_markup(admin_markup())
       .send()
       .await;

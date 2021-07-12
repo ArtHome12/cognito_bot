@@ -28,7 +28,7 @@ pub async fn check_database() {
    if rows.is_empty() {
       client.execute("CREATE TABLE chats (
          PRIMARY KEY (user_id),
-         user_id        INTEGER        NOT NULL,
+         user_id        BIGINT         NOT NULL,
          chat_name      VARCHAR(100)   NOT NULL,
          last_use       TIMESTAMP      NOT NULL,
          errors         INTEGER        NOT NULL
@@ -37,32 +37,32 @@ pub async fn check_database() {
 }
 
 /// Регистрация чата для пользователя
-pub async fn register(user_id: i32, chat_name: String) {
+pub async fn register(user_id: i64, chat_name: String) {
    let client = DB.get().unwrap();
 
    // Удалим прежнюю информацию, если пользователь уже регистрировал чат
    unregister(user_id).await;
 
    // Добавляем новую запись, при ошибке сообщение в лог
-   if let Err(e) = client.execute("INSERT INTO chats (user_id, chat_name, last_use, errors) VALUES ($1::INTEGER, $2::VARCHAR(100), NOW(), 0)", &[&user_id, &chat_name]).await {
+   if let Err(e) = client.execute("INSERT INTO chats (user_id, chat_name, last_use, errors) VALUES ($1::BIGINT, $2::VARCHAR(100), NOW(), 0)", &[&user_id, &chat_name]).await {
       log::error!("db_register({}, {}): {}", user_id, chat_name, e);
    }
 }
 
 /// Удаление инормации о пользователе
-pub async fn unregister(user_id: i32) {
+pub async fn unregister(user_id: i64) {
    let client = DB.get().unwrap();
    
    // Выполняем запрос для удаления записи, при ошибке сообщение в лог
-   if let Err(e) = client.execute("DELETE FROM chats WHERE user_id = $1::INTEGER", &[&user_id]).await {
+   if let Err(e) = client.execute("DELETE FROM chats WHERE user_id = $1::BIGINT", &[&user_id]).await {
       log::error!("db_unregister({}): {}", user_id, e);
    }
 }
 
 /// Возвращает название чата для указанного пользователя
-pub async fn user_chat_name(user_id: i32) -> Option<String> {
+pub async fn user_chat_name(user_id: i64) -> Option<String> {
    let client = DB.get().unwrap();
-   let res = client.query_one("SELECT chat_name FROM chats WHERE user_id = $1::INTEGER", &[&user_id]).await;
+   let res = client.query_one("SELECT chat_name FROM chats WHERE user_id = $1::BIGINT", &[&user_id]).await;
    match res {
       Ok(data) => Some(data.get(0)),
       _ => None,
@@ -70,7 +70,7 @@ pub async fn user_chat_name(user_id: i32) -> Option<String> {
 }
 
 /// Возвращает идентификатор админа чата
-pub async fn user_id(chat_name: &String) -> Option<i32> {
+pub async fn user_id(chat_name: &String) -> Option<i64> {
    let client = DB.get().unwrap();
    let res = client.query_one("SELECT user_id FROM chats WHERE chat_name = $1::VARCHAR(100)", &[&chat_name]).await;
    match res {
@@ -109,17 +109,17 @@ pub async fn chats_markup() -> InlineKeyboardMarkup {
 
 /// Увеличивает счётчик ошибок и если стало слишком много, удаляет чат
 /// Функция должна вызываться при каждой ошибке отправки сообщения админу или в чат
-pub async fn error_happened(user_id: i32) {
+pub async fn error_happened(user_id: i64) {
    let client = DB.get().unwrap();
 
    // Увеличиваем счётчик ошибок
-   if let Err(e) = client.execute("UPDATE chats SET errors = errors + 1 WHERE user_id = $1::INTEGER", &[&user_id]).await {
+   if let Err(e) = client.execute("UPDATE chats SET errors = errors + 1 WHERE user_id = $1::BIGINT", &[&user_id]).await {
       log::error!("error_happened({}): {}", user_id, e);
       return;
    };
 
    // Читаем счётчик ошибок
-   let res = client.query_one("SELECT errors FROM chats WHERE user_id = $1::INTEGER", &[&user_id]).await;
+   let res = client.query_one("SELECT errors FROM chats WHERE user_id = $1::BIGINT", &[&user_id]).await;
    match res {
       Ok(data) => {
          // Если ошибок слишком много, забываем чат
@@ -135,9 +135,9 @@ pub async fn error_happened(user_id: i32) {
 /// Функция должна вызываеться после каждой успешной попытки записи в чат, но не при
 /// успешной отправке сообщения админу, иначе это сбросит более приоритетный счётчик
 /// ошибок в чат
-pub async fn successful_sent(user_id: i32) {
+pub async fn successful_sent(user_id: i64) {
    let client = DB.get().unwrap();
-   if let Err(e) = client.execute("UPDATE chats SET errors = 0 WHERE user_id = $1::INTEGER", &[&user_id]).await {
+   if let Err(e) = client.execute("UPDATE chats SET errors = 0 WHERE user_id = $1::BIGINT", &[&user_id]).await {
       log::error!("successful_sent({}): {}", user_id, e);
    };
 }
